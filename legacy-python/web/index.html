@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>BiliDown · B 站视频下载</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect x='2' y='5' width='20' height='15' rx='4' fill='%2300AEEC'/%3E%3Cpath d='M12 9v5m0 0l-2.2-2.2M12 14l2.2-2.2' stroke='%23fff' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round' fill='none'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+
+<header class="nav">
+  <div class="brand">
+    <svg viewBox="0 0 24 24" width="26" height="26" fill="none">
+      <rect x="2" y="5" width="20" height="15" rx="4" fill="#00AEEC"/>
+      <path d="M8 3l2.2 2.4M16 3l-2.2 2.4" stroke="#00AEEC" stroke-width="1.8" stroke-linecap="round"/>
+      <path d="M12 9v5m0 0l-2.2-2.2M12 14l2.2-2.2" stroke="#fff" stroke-width="1.8"
+            stroke-linecap="round" stroke-linejoin="round"/>
+    </svg>
+    <span>BiliDown</span>
+  </div>
+  <div class="user" id="userArea"></div>
+</header>
+
+<main>
+  <section class="hero">
+    <h1>把想留的视频，存到本地</h1>
+    <p class="hero-sub">支持 BV 号、av 号、视频链接、b23 短链与分 P 视频</p>
+    <div class="input-wrap">
+      <input id="urlInput" autocomplete="off" spellcheck="false"
+             placeholder="https://www.bilibili.com/video/BV1GJ411x7h7">
+      <button id="parseBtn" class="primary">解析</button>
+    </div>
+    <div class="hero-hint" id="heroHint">登录后可获取该视频支持的最高清晰度</div>
+  </section>
+
+  <section id="resultCard" class="card hidden">
+    <div class="video-head">
+      <div class="cover-box"><img id="cover" alt=""></div>
+      <div class="meta">
+        <h2 id="vTitle"></h2>
+        <div class="meta-line" id="vMeta"></div>
+        <div class="meta-line dim" id="vDesc"></div>
+      </div>
+    </div>
+
+    <div id="warnBar" class="warn hidden"></div>
+
+    <div class="options">
+      <div class="opt-row hidden" id="pageRow">
+        <label>分 P</label>
+        <select id="pageSel"></select>
+      </div>
+      <div class="opt-row">
+        <label>清晰度</label>
+        <div class="chips" id="qnChips"></div>
+      </div>
+      <div class="opt-row">
+        <label>编码</label>
+        <div class="chips" id="codecChips"></div>
+      </div>
+      <div class="opt-row hidden" id="subRow">
+        <label>字幕</label>
+        <select id="subSel"></select>
+      </div>
+    </div>
+
+    <div class="actions">
+      <div class="size-hint" id="sizeHint"></div>
+      <button id="dlBtn" class="primary big">开始下载</button>
+    </div>
+  </section>
+
+  <section class="tasks">
+    <div class="section-title">
+      <span>下载任务</span>
+      <button id="openDirBtn" class="link">打开下载目录</button>
+    </div>
+    <div id="taskList" class="task-list"></div>
+    <div id="taskEmpty" class="empty">还没有任务</div>
+  </section>
+</main>
+
+<footer>
+  仅供个人离线备份已公开发布的视频，请勿二次传播。所有内容版权归原 UP 主及哔哩哔哩所有。
+</footer>
+
+<div id="loginModal" class="modal hidden">
+  <div class="modal-box">
+    <div class="modal-head">
+      <span>扫码登录</span>
+      <button class="close" id="closeLogin">×</button>
+    </div>
+    <div class="qr-wrap"><img id="qrImg" alt="二维码"></div>
+    <div class="qr-tip" id="qrTip">请用哔哩哔哩手机客户端扫码</div>
+    <div class="modal-note">登录信息仅保存在本机 cookie.json，不会上传任何服务器</div>
+  </div>
+</div>
+
+<div id="toast" class="toast"></div>
+
+<script src="/static/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,40 @@
+# 本地工具链、构建产物、运行时数据 —— 体积大且各人环境不同，不进仓库
+/toolchain/
+/bin/
+/build/
+/dist/
+/data/
+/.workbuddy/
+/启动.bat
+
+# 敏感 / 生成物：B 站登录票据、WebView2 缓存、下载的音视频
+cookie.json
+*.mp4
+*.m4s
+*.flv
+*.part
+*.tmp
+
+# WebView2 SDK 包很大，只保留编译与打包必需的几个文件
+/vendor/wv2.zip
+/vendor/webview2/*
+!/vendor/webview2/LICENSE.txt
+!/vendor/webview2/NOTICE.txt
+!/vendor/webview2/build/
+/vendor/webview2/build/*
+!/vendor/webview2/build/native/
+/vendor/webview2/build/native/*
+!/vendor/webview2/build/native/include/
+!/vendor/webview2/build/native/x64/
+/vendor/webview2/build/native/include/*
+!/vendor/webview2/build/native/include/*.h
+/vendor/webview2/build/native/x64/*
+!/vendor/webview2/build/native/x64/WebView2Loader.dll
+
+# 编辑器与系统
+.vscode/
+.idea/
+__pycache__/
+*.pyc
+Thumbs.db
+desktop.ini

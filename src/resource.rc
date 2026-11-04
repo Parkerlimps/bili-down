@@ -1,0 +1,29 @@
+#include "resource.h"
+
+IDR_HTML RCDATA "build\\ui.html"
+IDI_APP  ICON   "build\\app.ico"
+
+1 VERSIONINFO
+FILEVERSION     1,0,0,0
+PRODUCTVERSION  1,0,0,0
+FILEOS          0x40004L
+FILETYPE        0x1L
+{
+    BLOCK "StringFileInfo"
+    {
+        BLOCK "080404b0"
+        {
+            VALUE "CompanyName",      "PALI"
+            VALUE "FileDescription",  "BiliDown - Bilibili video downloader"
+            VALUE "FileVersion",      "1.0.0.0"
+            VALUE "InternalName",     "BiliDown"
+            VALUE "OriginalFilename", "BiliDown.exe"
+            VALUE "ProductName",      "BiliDown"
+            VALUE "ProductVersion",   "1.0.0.0"
+        }
+    }
+    BLOCK "VarFileInfo"
+    {
+        VALUE "Translation", 0x804, 1200
+    }
+}
