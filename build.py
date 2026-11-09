@@ -1,7 +1,8 @@
 """BiliDown 构建脚本。
 
 流程：生成图标 -> 内联前端 -> 编译资源 -> 编译链接 -> 输出到 dist/
-用法：python build.py
+用法：python build.py            仅构建
+      python build.py --release  构建后按白名单生成发布 zip
 
 仓库不含 MinGW-w64：优先用 toolchain/mingw64/bin/ 下的 g++ / windres，
 找不到就回退到 PATH 中已有的 MinGW-w64。
@@ -9,8 +10,11 @@
 
 from __future__ import annotations
 
+import re
 import shutil
 import subprocess
+import sys
+import zipfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
@@ -85,6 +89,14 @@ def run(cmd: list[str], what: str) -> None:
         print(p.stderr[:800])
 
 
+def app_version() -> str:
+    m = re.search(r'constexpr\s+const\s+char\*\s+VERSION\s*=\s*"([^"]+)"',
+                  (SRC / "app.h").read_text("utf-8"))
+    if not m:
+        raise SystemExit("src/app.h 里找不到 VERSION 常量")
+    return m.group(1)
+
+
 def build() -> None:
     gxx, windres = find_tools()
 
@@ -128,5 +140,52 @@ def build() -> None:
     print(f"  目录：{[p.name for p in DIST.iterdir()]}")
 
 
+def package_release() -> Path:
+    """按固定白名单打发布包：dist/ 里还有登录票据、缓存、下载视频，绝不能整个目录打包。"""
+    version = app_version()
+    files = {
+        "BiliDown.exe": DIST / "BiliDown.exe",
+        "WebView2Loader.dll": DIST / "WebView2Loader.dll",
+        "ffmpeg.exe": DIST / "ffmpeg.exe",
+        "LICENSE.txt": ROOT / "LICENSE",
+        "THIRD-PARTY-NOTICES.md": ROOT / "THIRD-PARTY-NOTICES.md",
+        "LICENSE-FFmpeg.txt": ROOT / "bin" / "ffmpeg-9.0.2-essentials_build" / "LICENSE",
+        "LICENSE-WebView2.txt": ROOT / "vendor" / "webview2" / "LICENSE.txt",
+    }
+    missing = [name for name, path in files.items() if not path.exists()]
+    if missing:
+        raise SystemExit("发布包缺少文件：" + "、".join(missing))
+
+    readme = f"""BiliDown v{version}
+
+把 BV 号或 B 站视频链接粘进输入框就能下载。
+
+1. 三个 exe/dll 保持在同一目录，双击 BiliDown.exe。
+2. 未登录只能拿 480P；点右上角「扫码登录」后可下 1080P / 4K。
+   登录票据存在 %LOCALAPPDATA%\\BiliDown\\cookie.json，只在本机，不上传。
+3. 视频默认保存在 exe 旁边的 download\\ 目录。点界面「任务」区上方的「更改」
+   可自定义下载目录，设置保存在 %LOCALAPPDATA%\\BiliDown\\settings.json，
+   重启后仍然有效；「恢复默认」可清掉设置。
+
+ffmpeg.exe 为 GPLv3 软件，许可全文见 LICENSE-FFmpeg.txt，源码与构建信息见
+THIRD-PARTY-NOTICES.md。BiliDown 自身为 MIT。
+
+仅供个人离线观看已公开发布的视频，请勿再分发，版权归原 UP 主与哔哩哔哩所有。
+项目地址：https://github.com/Parkerlimps/bili-down
+"""
+
+    out = DIST / "release"
+    out.mkdir(exist_ok=True)
+    zpath = out / f"BiliDown-v{version}.zip"
+    with zipfile.ZipFile(zpath, "w", zipfile.ZIP_DEFLATED, compresslevel=6) as z:
+        for name, path in files.items():
+            z.write(path, name)
+        z.writestr("README.txt", readme)
+    print(f"\n发布包：{zpath}  {zpath.stat().st_size / 1048576:.1f} MB  {len(files) + 1} 个文件")
+    return zpath
+
+
 if __name__ == "__main__":
     build()
+    if "--release" in sys.argv[1:]:
+        package_release()

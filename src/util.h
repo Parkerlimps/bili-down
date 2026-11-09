@@ -15,6 +15,7 @@
 #include <string>
 #include <vector>
 #include <cstdint>
+#include <cctype>
 
 namespace util {
 
@@ -100,8 +101,9 @@ inline double nowSec() {
 inline std::string safeName(const std::string& s, size_t limit = 100) {
     std::string out;
     for (char c : s) {
-        if (c == '\\' || c == '/' || c == ':' || c == '*' || c == '?' || c == '"' ||
-            c == '<' || c == '>' || c == '|' || c == '\r' || c == '\n' || c == '\t')
+        unsigned char uc = (unsigned char)c;
+        if (uc < 0x20 || c == '\\' || c == '/' || c == ':' || c == '*' || c == '?' || c == '"' ||
+            c == '<' || c == '>' || c == '|')
             out += ' ';
         else
             out += c;
@@ -119,6 +121,15 @@ inline std::string safeName(const std::string& s, size_t limit = 100) {
         }
     }
     while (!r.empty() && (r.back() == ' ' || r.back() == '.')) r.pop_back();
+    // CON / PRN / NUL / COM1 / LPT1 这类设备名不能当文件名，加前缀避开
+    std::string up = r.substr(0, r.find('.'));
+    for (char& c : up) c = (char)toupper((unsigned char)c);
+    static const char* reserved[] = {
+        "CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "COM5",
+        "COM6", "COM7", "COM8", "COM9", "LPT1", "LPT2", "LPT3", "LPT4",
+        "LPT5", "LPT6", "LPT7", "LPT8", "LPT9"};
+    for (auto* n : reserved)
+        if (up == n) { r = "_" + r; break; }
     if (r.size() > limit) {
         size_t cut = limit;
         while (cut > 0 && ((unsigned char)r[cut] & 0xC0) == 0x80) cut--;

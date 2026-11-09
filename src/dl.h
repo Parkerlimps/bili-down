@@ -281,7 +281,8 @@ inline bool merge(const std::string& ffmpeg, const std::string& video, const std
     if (!subtitle.empty()) cmd += " -i \"" + subtitle + "\"";
     cmd += " -map 0:v:0";
     if (!audio.empty()) cmd += " -map 1:a:0";
-    if (!subtitle.empty()) cmd += " -map 2:s:0";
+    // 没有音轨时字幕是第 1 个输入，写死 2:s:0 会让 ffmpeg 找不到流、整个合流失败
+    if (!subtitle.empty()) cmd += std::string(" -map ") + (audio.empty() ? "1" : "2") + ":s:0";
 
     if (audioNeedsTranscode) {
         cmd += " -c:v copy -c:a aac -b:a 320k";

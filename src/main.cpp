@@ -57,6 +57,13 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             }
             return 0;
         }
+        case app::WM_PICK_DIR: {
+            // 文件夹对话框必须在 UI 线程弹：COM 在这里初始化，owner 窗口也在这里。
+            // worker 用 SendMessage 阻塞等这个结果，指针在它返回前一直有效
+            auto* out = (std::string*)lp;
+            if (out) *out = app::pickFolder(hwnd, util::widen(g_app.currentOutDir()));
+            return 0;
+        }
         case WM_WV_FAIL: {
             wchar_t buf[512];
             swprintf(buf, 512,
@@ -152,6 +159,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR, int) {
                                 WS_OVERLAPPEDWINDOW, (sx - w) / 2, std::max(0, (sy - h) / 2 - 30),
                                 w, h, nullptr, nullptr, hInst, nullptr);
     if (!hwnd) return 1;
+    g_app.hwnd = hwnd;  // 文件夹选择对话框要用它作 owner
 
     // 页面发来的每条 RPC 都丢进工作线程，UI 线程只负责收发消息，
     // 不再被 parse 那串网络请求堵住

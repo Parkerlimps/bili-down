@@ -2,7 +2,8 @@
 
 const $ = (id) => document.getElementById(id);
 
-const S = { data: null, qn: 0, codecid: 7, page: 1, sub: "", tasks: [], ids: "", timer: null, qrTimer: null };
+const S = { data: null, qn: 0, codecid: 7, page: 1, sub: "", tasks: [], ids: "",
+            timer: null, qrTimer: null, outDir: "", defaultOutDir: "" };
 
 /* ---------- RPC ---------- */
 
@@ -19,7 +20,7 @@ if (window.chrome && window.chrome.webview) {
   });
 }
 
-function rpc(method, params = {}) {
+function rpc(method, params = {}, timeoutMs = 40000) {
   return new Promise((resolve, reject) => {
     const id = String(++seq);
     pending.set(id, { resolve, reject });
@@ -34,7 +35,7 @@ function rpc(method, params = {}) {
         pending.delete(id);
         reject(new Error("请求超时"));
       }
-    }, 40000);
+    }, timeoutMs);
   });
 }
 
@@ -82,9 +83,21 @@ const fmtFps = (v) => {
 
 let me = null;
 
+function showOutDir(d) {
+  if (!d || !d.outDir) return;
+  S.outDir = d.outDir;
+  S.defaultOutDir = d.defaultOutDir || d.outDir;
+  const el = $("outDirText");
+  el.textContent = d.outDir;
+  el.title = d.outDir;
+  $("outDirWarn").classList.toggle("hidden", d.writable !== false);
+  $("dirInput").placeholder = S.defaultOutDir;
+}
+
 async function loadMe() {
   const d = await rpc("init");
   me = d;
+  showOutDir(d);
   const box = $("userArea");
   box.innerHTML = "";
   if (d.loggedIn) {
@@ -405,10 +418,70 @@ function renderTasks() {
       a.onclick = () => {
         const k = a.dataset.a;
         if (k === "cancel") rpc("cancel", { id: t.id }).catch(() => {});
-        else if (k === "play" || k === "dir") rpc("open", { file: t.file }).catch(() => {});
+        else if (k === "play") rpc("open", { file: t.file }).catch(() => {});
+        else if (k === "dir") rpc("open", { file: t.file, reveal: true }).catch(() => {});
       };
     });
   });
+}
+
+/* ---------- 下载目录 ---------- */
+
+function openDirSettings() {
+  $("dirInput").value = S.outDir || S.defaultOutDir || "";
+  $("dirHint").textContent = "";
+  $("dirModal").classList.remove("hidden");
+  $("dirInput").focus();
+}
+
+function closeDirSettings() {
+  $("dirModal").classList.add("hidden");
+}
+
+async function saveDirSettings() {
+  const btn = $("saveDir");
+  btn.disabled = true;
+  try {
+    const d = await rpc("settings.set", { path: $("dirInput").value.trim() });
+    showOutDir(d);
+    closeDirSettings();
+    toast("下载目录已更新");
+  } catch (e) {
+    $("dirHint").textContent = e.message;
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+async function browseDir() {
+  const btn = $("browseDir");
+  btn.disabled = true;
+  $("dirHint").textContent = "正在打开文件夹选择窗口…";
+  try {
+    // 选目录是人工操作，可能远超默认 40 秒 RPC 超时，这里单独放宽
+    const d = await rpc("settings.pick", {}, 300000);
+    if (d.path) {
+      $("dirInput").value = d.path;
+      $("dirHint").textContent = "已选择，点「保存」生效";
+    } else {
+      $("dirHint").textContent = "已取消选择";
+    }
+  } catch (e) {
+    $("dirHint").textContent = e.message;
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+async function resetDirSettings() {
+  try {
+    const d = await rpc("settings.reset");
+    showOutDir(d);
+    closeDirSettings();
+    toast("已恢复默认下载目录");
+  } catch (e) {
+    $("dirHint").textContent = e.message;
+  }
 }
 
 /* ---------- 绑定 ---------- */
@@ -417,6 +490,12 @@ $("parseBtn").onclick = () => doParse();
 $("urlInput").addEventListener("keydown", (e) => { if (e.key === "Enter") doParse(); });
 $("dlBtn").onclick = startDownload;
 $("openDir").onclick = () => rpc("open", { file: "" }).catch(() => {});
+$("changeDir").onclick = openDirSettings;
+$("closeDirModal").onclick = closeDirSettings;
+$("saveDir").onclick = saveDirSettings;
+$("browseDir").onclick = browseDir;
+$("resetDir").onclick = resetDirSettings;
+$("dirInput").addEventListener("keydown", (e) => { if (e.key === "Enter") saveDirSettings(); });
 $("closeModal").onclick = () => {
   $("modal").classList.add("hidden");
   clearTimeout(S.qrTimer);

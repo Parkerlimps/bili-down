@@ -15,6 +15,7 @@
 #include <shellapi.h>
 #include <objbase.h>
 #include <shlobj.h>
+#include <shobjidl.h>   // IFileDialog / IShellItem
 
 #include "bili.h"
 #include "dl.h"
@@ -24,6 +25,44 @@
 namespace app {
 
 using json = nlohmann::json;
+
+constexpr const char* VERSION = "1.1.0";
+// 文件夹选择对话框必须在创建 WebView2 的 UI 线程弹出（COM 在那里初始化、窗口也在那里）。
+// RPC worker 用 SendMessage 同步请求，WndProc 收到后调用 pickFolder 并回填结果。
+constexpr UINT WM_PICK_DIR = WM_APP + 3;
+
+inline std::string pickFolder(HWND owner, const std::wstring& initial) {
+    IFileDialog* dlg = nullptr;
+    if (FAILED(CoCreateInstance(CLSID_FileOpenDialog, nullptr, CLSCTX_INPROC_SERVER,
+                                IID_IFileDialog, (void**)&dlg)) || !dlg)
+        return "";
+    DWORD opts = FOS_PICKFOLDERS | FOS_FORCEFILESYSTEM | FOS_PATHMUSTEXIST;
+    dlg->GetOptions(&opts);
+    dlg->SetOptions(opts | FOS_PICKFOLDERS | FOS_FORCEFILESYSTEM | FOS_PATHMUSTEXIST);
+    dlg->SetTitle(L"选择下载目录");
+    if (!initial.empty()) {
+        IShellItem* folder = nullptr;
+        if (SUCCEEDED(SHCreateItemFromParsingName(initial.c_str(), nullptr,
+                                                  IID_IShellItem, (void**)&folder)) && folder) {
+            dlg->SetFolder(folder);  // 打不开初始目录就算了，不影响选目录
+            folder->Release();
+        }
+    }
+    std::string out;
+    if (SUCCEEDED(dlg->Show(owner))) {
+        IShellItem* item = nullptr;
+        if (SUCCEEDED(dlg->GetResult(&item)) && item) {
+            PWSTR path = nullptr;
+            if (SUCCEEDED(item->GetDisplayName(SIGDN_FILESYSPATH, &path)) && path) {
+                out = util::narrow(path);
+                CoTaskMemFree(path);
+            }
+            item->Release();
+        }
+    }
+    dlg->Release();
+    return out;
+}
 
 // %LOCALAPPDATA%。票据、WebView2 缓存、下载临时文件都放这里：
 // exe 目录可能没有写权限（Program Files），而这些本来也不是随 exe 走的文件
@@ -62,6 +101,9 @@ inline const char* statusText(int s) {
 
 struct Task {
     std::string id, bvid, title, part;
+    // 目录可以在下载途中被改掉，任务创建时拍一份快照：
+    // 已在跑的任务仍写原目录，新任务才用新目录，避免跨线程读写同一个 std::string
+    std::string outDir;
     int page = 1;
     int qn = 80;
     int codecid = 7;
@@ -116,12 +158,17 @@ struct Task {
 class App {
 public:
     std::string exeDir;
-    std::string dataDir;   // %LOCALAPPDATA%\BiliDown，票据/缓存/临时文件
+    std::string dataDir;   // %LOCALAPPDATA%\BiliDown，票据/缓存/临时/设置
+    std::string settingsPath;
+    std::string defaultOutDir;
     std::string outDir;
     std::string ffmpeg;
+    bool customOutDir = false;
+    HWND hwnd = nullptr;
     std::unique_ptr<bili::Client> client;
     std::vector<std::shared_ptr<Task>> tasks;
     std::mutex mtx;
+    mutable std::mutex outMtx;  // 保护 outDir / customOutDir
     int seq = 0;
 
     void init(const std::string& dir) {
@@ -130,6 +177,7 @@ public:
         dataDir = localAppDataDir() + "\\BiliDown";
         util::makeDirs(dataDir);
         util::makeDirs(dataDir + "\\tmp");
+        settingsPath = dataDir + "\\settings.json";
 
         // 旧版本把 cookie.json 放在 exe 旁，迁移过来，升级后不丢登录态。
         // 只复制不删除，exe 目录里的旧文件留作备份
@@ -138,18 +186,138 @@ public:
         if (!util::fileExists(newCookie) && util::fileExists(oldCookie))
             CopyFileW(util::widen(oldCookie).c_str(), util::widen(newCookie).c_str(), FALSE);
 
-        // 下载产物优先放 exe 旁（用户找得到）；写不进去就退回应用数据目录
-        outDir = exeDir + "\\download";
-        util::makeDirs(outDir);
-        if (!util::dirExists(outDir) || !util::canWrite(outDir))
-            outDir = dataDir + "\\download";
-        util::makeDirs(outDir);
+        // 默认产物目录：优先 exe 旁（用户找得到）；写不进去就退回应用数据目录
+        std::string def = exeDir + "\\download";
+        util::makeDirs(def);
+        if (!util::dirExists(def) || !util::canWrite(def)) {
+            def = dataDir + "\\download";
+            util::makeDirs(def);
+        }
+        defaultOutDir = def;
+        {
+            std::lock_guard<std::mutex> lk(outMtx);
+            outDir = def;
+            customOutDir = false;
+        }
+        loadSettings();
 
         ffmpeg = dl::findFfmpeg(dir);
         client = std::make_unique<bili::Client>(newCookie);
         try {
             client->refreshLogin();
         } catch (...) {}
+    }
+
+    // ---------- 下载目录设置 ----------
+
+    static bool isAbsPath(const std::string& s) {
+        if (s.size() >= 2 && s[1] == ':' &&
+            ((s[0] >= 'A' && s[0] <= 'Z') || (s[0] >= 'a' && s[0] <= 'z'))) return true;
+        return s.size() >= 2 && s[0] == '\\' && s[1] == '\\';  // UNC
+    }
+
+    // 复制来的路径常带首尾空格/引号，Win 也接受 / 分隔；统一成可直接用的绝对路径
+    static std::string normalizeDirPath(const std::string& raw) {
+        auto notSpace = [](char c) { return c != ' ' && c != '\t' && c != '\r' && c != '\n'; };
+        size_t a = 0, b = raw.size();
+        while (a < b && !notSpace(raw[a])) a++;
+        while (b > a && !notSpace(raw[b - 1])) b--;
+        std::string s = raw.substr(a, b - a);
+        if (s.size() >= 2 && s.front() == '"' && s.back() == '"')
+            s = s.substr(1, s.size() - 2);
+        for (char& c : s) if (c == '/') c = '\\';
+        while (s.size() > 3 && s.back() == '\\') s.pop_back();
+        if (s.empty()) return s;
+        std::vector<wchar_t> full(32768);
+        DWORD n = GetFullPathNameW(util::widen(s).c_str(), (DWORD)full.size(), full.data(), nullptr);
+        if (n > 0 && n < full.size()) s = util::narrow(std::wstring(full.data(), n));
+        while (s.size() > 3 && s.back() == '\\') s.pop_back();
+        return s;
+    }
+
+    void loadSettings() {
+        if (!util::fileExists(settingsPath)) return;
+        FILE* f = _wfopen(util::widen(settingsPath).c_str(), L"rb");
+        if (!f) return;
+        std::string s;
+        char buf[4096];
+        size_t n;
+        while ((n = fread(buf, 1, sizeof(buf), f)) > 0) s.append(buf, n);
+        fclose(f);
+        try {
+            auto j = json::parse(s);
+            if (!j.value("custom", false)) return;
+            std::string p = normalizeDirPath(j.value("outDir", ""));
+            if (p.empty() || !isAbsPath(p)) return;
+            util::makeDirs(p);
+            // 目录被删、U 盘拔了、权限变了：静默回退默认目录，
+            // 但保留配置文件，下次它回来时还能自动用上
+            if (!util::dirExists(p) || !util::canWrite(p)) return;
+            std::lock_guard<std::mutex> lk(outMtx);
+            outDir = p;
+            customOutDir = true;
+        } catch (...) {}
+    }
+
+    void saveSettings() {
+        std::string d = currentOutDir();
+        json j;
+        j["version"] = 1;
+        j["custom"] = customOutDir;
+        j["outDir"] = d;  // dump 默认不转义非 ASCII，中文路径原样存 UTF-8
+        std::string s = j.dump(2);
+        FILE* f = _wfopen(util::widen(settingsPath).c_str(), L"wb");
+        if (!f) throw bili::BiliError("设置写入失败，请检查应用数据目录权限");
+        size_t n = fwrite(s.data(), 1, s.size(), f);
+        fclose(f);
+        if (n != s.size()) throw bili::BiliError("设置写入不完整");
+    }
+
+    std::string currentOutDir() const {
+        std::lock_guard<std::mutex> lk(outMtx);
+        return outDir;
+    }
+
+    json settingsInfo() const {
+        std::lock_guard<std::mutex> lk(outMtx);
+        std::string d = outDir;
+        return json{{"outDir", d}, {"defaultOutDir", defaultOutDir},
+                    {"custom", customOutDir}, {"writable", util::canWrite(d)},
+                    {"version", VERSION}};
+    }
+
+    json setOutDir(const std::string& raw) {
+        std::string p = normalizeDirPath(raw);
+        if (p.empty()) throw bili::BiliError("请填写下载目录");
+        if (!isAbsPath(p)) throw bili::BiliError("请填写完整路径，例如 D:\\Videos");
+        util::makeDirs(p);
+        if (!util::dirExists(p)) throw bili::BiliError("目录创建失败，请检查路径是否有效");
+        if (!util::canWrite(p)) throw bili::BiliError("该目录不可写，请换一个位置");
+        {
+            std::lock_guard<std::mutex> lk(outMtx);
+            outDir = p;
+            customOutDir = true;
+        }
+        saveSettings();
+        return settingsInfo();
+    }
+
+    json resetOutDir() {
+        {
+            std::lock_guard<std::mutex> lk(outMtx);
+            outDir = defaultOutDir;
+            customOutDir = false;
+        }
+        DeleteFileW(util::widen(settingsPath).c_str());
+        return settingsInfo();
+    }
+
+    json pickOutDir() {
+        if (!hwnd) throw bili::BiliError("窗口尚未就绪，请在输入框里直接粘贴路径");
+        std::string picked;
+        // 同步消息：UI 线程弹对话框，worker 等结果。同一进程内跨线程传栈上指针是安全的
+        SendMessageW(hwnd, WM_PICK_DIR, 0, (LPARAM)&picked);
+        return json{{"path", picked}, {"cancelled", picked.empty()}};
     }
 
     // ---------- RPC ----------
@@ -184,7 +352,11 @@ public:
         if (m == "download") return startDownload(p);
         if (m == "tasks") return listTasks();
         if (m == "cancel") return cancelTask(p.value("id", ""));
-        if (m == "open") return openPath(p.value("file", ""));
+        if (m == "open") return openPath(p.value("file", ""), p.value("reveal", false));
+        if (m == "settings.get") return settingsInfo();
+        if (m == "settings.set") return setOutDir(p.value("path", ""));
+        if (m == "settings.reset") return resetOutDir();
+        if (m == "settings.pick") return pickOutDir();
         if (m == "login.qr") return client->qrGenerate();
         if (m == "login.poll") return pollLogin(p.value("key", ""));
         if (m == "logout") {
@@ -196,14 +368,12 @@ public:
 
     json initInfo() {
         auto acc = client->account();
-        json j;
+        json j = settingsInfo();
         j["loggedIn"] = acc.loggedIn;
         j["name"] = acc.name;
         j["face"] = acc.face;
         j["vip"] = acc.vip;
         j["ffmpeg"] = !ffmpeg.empty();
-        j["outDir"] = outDir;
-        j["version"] = "1.0";
         return j;
     }
 
@@ -297,6 +467,7 @@ public:
         t->bvid = p.value("bvid", "");
         t->title = p.value("title", "video");
         t->part = p.value("part", "");
+        t->outDir = currentOutDir();
         t->page = p.value("page", 1);
         t->qn = p.value("qn", 80);
         t->codecid = p.value("codecid", 7);
@@ -468,9 +639,9 @@ public:
             checkCancel();
             std::string base = util::safeName(t->title);
             if (t->page > 1) base += "_P" + std::to_string(t->page) + "_" + util::safeName(t->part, 40);
-            std::string out = outDir + "\\" + base + ".mp4";
+            std::string out = t->outDir + "\\" + base + ".mp4";
             for (int n = 2; util::fileExists(out); n++)
-                out = outDir + "\\" + base + " (" + std::to_string(n) + ").mp4";
+                out = t->outDir + "\\" + base + " (" + std::to_string(n) + ").mp4";
             outPath = out;
 
             std::string err;
@@ -493,7 +664,7 @@ public:
             if (GetFileAttributesExW(util::widen(out).c_str(), GetFileExInfoStandard, &fad))
                 sz = ((unsigned long long)fad.nFileSizeHigh << 32) | fad.nFileSizeLow;
             t->done = sz;
-            t->say("已保存 " + base + ".mp4（" + util::fmtSize((double)sz) + "）");
+            t->say("已保存到 " + out + "（" + util::fmtSize((double)sz) + "）");
 
         } catch (const bili::BiliError& e) {
             bool cancelled = t->prog.cancelled;
@@ -560,9 +731,17 @@ public:
         return json{{"ok", false}};
     }
 
-    json openPath(const std::string& file) {
-        std::wstring target = util::widen(file.empty() ? outDir : file);
-        if (!util::fileExists(file) && !util::dirExists(file)) target = util::widen(outDir);
+    json openPath(const std::string& file, bool reveal) {
+        std::string cur = currentOutDir();
+        // "打开目录"的语义是在资源管理器里定位文件，而不是再用默认播放器打开一遍 mp4
+        if (reveal && !file.empty() && util::fileExists(file)) {
+            std::wstring args = L"/select,\"" + util::widen(file) + L"\"";
+            ShellExecuteW(nullptr, L"open", L"explorer.exe", args.c_str(), nullptr, SW_SHOWNORMAL);
+            return json{{"ok", true}};
+        }
+        std::wstring target = util::widen(file.empty() ? cur : file);
+        if (file.empty() || (!util::fileExists(file) && !util::dirExists(file)))
+            target = util::widen(cur);
         ShellExecuteW(nullptr, L"open", target.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
         return json{{"ok", true}};
     }

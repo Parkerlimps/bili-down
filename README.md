@@ -5,7 +5,7 @@
 
 ## 下载使用
 
-到 [Releases](https://github.com/Parkerlimps/bili-down/releases) 下载 `BiliDown-v1.0.0.zip`，
+到 [Releases](https://github.com/Parkerlimps/bili-down/releases) 下载 `BiliDown-v1.1.0.zip`，
 解压后双击 `BiliDown.exe`。三个文件必须放在同一目录：
 
 | 文件 | 作用 |
@@ -15,8 +15,13 @@
 | `ffmpeg.exe` | 把分离的音视频流合并成 mp4 |
 
 下载的文件默认落在 exe 旁边的 `download\` 子目录（如果那个位置没有写权限，比如装在
-Program Files，会自动改放到 `%LOCALAPPDATA%\BiliDown\download`），界面上的「打开下载目录」
-永远指向实际位置。
+Program Files，会自动改放到 `%LOCALAPPDATA%\BiliDown\download`）。
+
+**下载目录可以改**：界面「任务」区上方显示当前目录，点「更改」→「浏览…」选文件夹，
+或直接粘贴完整路径后保存。设置写入 `%LOCALAPPDATA%\BiliDown\settings.json`，下次启动仍然有效；
+「恢复默认」清掉设置。启动时会校验目录是否还存在、是否可写，失效（比如 U 盘拔了）就自动
+回退默认目录。已经在下载的任务仍写入原来的目录，不受中途改动影响。
+「打开下载目录」和任务里的「打开目录」都指向文件实际所在位置。
 
 ## 关于清晰度
 
@@ -48,6 +53,8 @@ python build.py
 ```
 
 脚本会：生成图标 → 把 CSS/JS 内联进 HTML → `windres` 编资源 → `g++` 链接 → 输出到 `dist/`。
+`python build.py --release` 会额外按白名单生成 `dist/release/BiliDown-v<版本>.zip`
+（只打 exe、dll、ffmpeg 与许可文件，不会把 `dist/` 里的登录票据或下载视频打进去）。
 链接的全部是 Windows 自带库（winhttp / ole32 / shell32 等），静态链接运行库，不需要额外 DLL。
 
 `ffmpeg.exe` 不随源码分发。想要合流功能，自行下载 FFmpeg 的 Windows 构建放到
@@ -64,6 +71,8 @@ python build.py
 - **下载**：先 `Range: bytes=0-0` 探测总长，预分配文件，多线程各领 4MB 块 `seek` 写入，失败重试 4 次。见 `src/dl.h`。
 - **合流**：`ffmpeg -c copy` 直接封装，不重新编码；字幕转 SRT 后作为软字幕轨道（`mov_text`）塞进去。
 - **界面通信**：没有本地 HTTP 服务，前端 `chrome.webview.postMessage` → C++ 处理 → `PostWebMessageAsJson` 回包，RPC 形式。
+- **下载目录**：`%LOCALAPPDATA%\BiliDown\settings.json` 保存自定义目录，任务创建时拍一份目录快照；
+  文件夹选择对话框由 UI 线程弹（RPC 工作线程通过消息同步请求），避免跨线程 COM 问题。见 `src/app.h`。
 
 ## 目录
 
@@ -76,7 +85,7 @@ legacy-python/ 早期 Python 实现，仅作参考，未维护
 ```
 
 `toolchain/`（MinGW-w64）、`bin/`（FFmpeg）、`build/`、`dist/`（产物、缓存、登录票据、
-下载的视频）都在 `.gitignore` 里，不进仓库。
+下载目录设置、下载的视频）都在 `.gitignore` 里，不进仓库。
 
 ## 第三方组件与许可
 

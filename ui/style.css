@@ -276,6 +276,54 @@ select:focus { border-color: var(--blue); }
   margin-bottom: 12px;
 }
 
+/* 下载目录 */
+.outbar {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin-bottom: 12px;
+  padding: 8px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--soft);
+  font-size: 12px;
+}
+
+.out-label { color: var(--faint); flex: 0 0 auto; }
+
+.out-path {
+  flex: 1;
+  min-width: 0;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  direction: ltr;
+  user-select: text;
+}
+
+.out-warn { color: var(--err); flex: 0 0 auto; font-size: 11px; }
+
+.dir-dialog { width: 420px; text-align: left; padding-bottom: 18px; }
+.dir-body { margin-top: 4px; }
+.dir-tip { font-size: 12px; color: var(--muted); line-height: 1.7; margin-bottom: 12px; }
+
+.dir-input {
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  padding: 9px 11px;
+  font-size: 12.5px;
+  color: var(--text);
+  outline: 0;
+  user-select: text;
+}
+.dir-input:focus { border-color: var(--blue); }
+
+.dir-actions { display: flex; justify-content: flex-end; gap: 9px; margin-top: 12px; }
+.dir-foot { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 14px; }
+.dir-hint { font-size: 11.5px; color: var(--err); text-align: right; line-height: 1.5; }
+
 .task {
   border: 1px solid var(--line);
   border-radius: 10px;

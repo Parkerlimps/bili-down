@@ -73,6 +73,12 @@
       <span>任务</span>
       <button id="openDir" class="text">打开下载目录</button>
     </div>
+    <div class="outbar">
+      <span class="out-label">下载到</span>
+      <span id="outDirText" class="out-path" title=""></span>
+      <button id="changeDir" class="text">更改</button>
+      <span id="outDirWarn" class="out-warn hidden">目录不可写</span>
+    </div>
     <div id="taskList"></div>
     <div id="empty" class="empty">暂无任务</div>
   </section>
@@ -87,6 +93,28 @@
     <div class="qr"><div id="qrBox"></div></div>
     <div class="tip" id="qrTip">正在获取二维码…</div>
     <div class="note">登录票据只保存在本机，用于获取账号权限内的清晰度</div>
+  </div>
+</div>
+
+<div id="dirModal" class="modal hidden">
+  <div class="dialog dir-dialog">
+    <div class="dialog-head">
+      <span>下载目录</span>
+      <button id="closeDirModal" class="x">×</button>
+    </div>
+    <div class="dir-body">
+      <p class="dir-tip">视频会保存到这个文件夹。设置只保存在本机，下次启动仍然有效；已在下载的任务不受影响。</p>
+      <input id="dirInput" class="dir-input" spellcheck="false" autocomplete="off"
+             placeholder="D:\Videos">
+      <div class="dir-actions">
+        <button id="browseDir" class="ghost">浏览…</button>
+        <button id="saveDir" class="primary">保存</button>
+      </div>
+      <div class="dir-foot">
+        <button id="resetDir" class="text">恢复默认</button>
+        <span id="dirHint" class="dir-hint"></span>
+      </div>
+    </div>
   </div>
 </div>
 
